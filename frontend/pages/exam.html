@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active Exam - AI Proctoring System</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <style>
+        .exam-page-container {
+            display: flex;
+            height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+            background-color: #f4f7f6;
+            gap: 20px;
+        }
+        
+        .exam-content {
+            flex: 3;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .exam-sidebar {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .camera-box {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 3px solid #ccc;
+            aspect-ratio: 4/3;
+            position: relative;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect */
+            display: block;
+        }
+
+        .recording-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 0, 0, 0.8);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .red-dot {
+            width: 8px;
+            height: 8px;
+            background: white;
+            border-radius: 50%;
+            animation: blink 1s infinite alternate;
+        }
+
+        @keyframes blink {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        .alert-box {
+            padding: 15px;
+            background: #f8dbdb;
+            color: #b30000;
+            border-left: 4px solid #b30000;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .exam-questions {
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+
+        .question {
+            margin-bottom: 25px;
+        }
+
+        .question textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-family: inherit;
+            resize: vertical;
+        }
+    </style>
+</head>
+<body>
+    <div class="exam-page-container">
+        
+        <!-- Left Side: Actual Exam -->
+        <main class="exam-content">
+            <h2>Final Examination: CS101</h2>
+            <hr style="margin-bottom: 20px; border: 0; border-top: 1px solid #eee;">
+            
+            <div id="violation-warning" class="alert-box">
+                <strong>Warning:</strong> <span id="warning-text">Suspicious activity detected!</span>
+            </div>
+
+            <div class="exam-questions">
+                <div class="question">
+                    <p><strong>Q1.</strong> Explain the difference between supervised and unsupervised learning.</p>
+                    <textarea rows="5" placeholder="Type your answer here..."></textarea>
+                </div>
+                <div class="question">
+                    <p><strong>Q2.</strong> What is the purpose of backpropagation in neural networks?</p>
+                    <textarea rows="5" placeholder="Type your answer here..."></textarea>
+                </div>
+            </div>
+
+            <button id="finish-btn" class="btn-primary" style="margin-top: auto; padding: 15px; font-size: 16px; background-color: #28a745;">
+                Submit Exam & Upload Session
+            </button>
+        </main>
+
+        <!-- Right Side: Proctoring Tracking -->
+        <aside class="exam-sidebar">
+            <div class="camera-box">
+                <div class="recording-indicator">
+                    <div class="red-dot"></div>
+                    REC
+                </div>
+                <!-- User sees themselves here the whole time -->
+                <video id="video" autoplay muted playsinline></video>
+            </div>
+            
+            <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                <h4 style="margin-bottom: 10px; color: #333;">System Status</h4>
+                <p id="status-text" style="color: #28a745; font-size: 14px; font-weight: bold;">🟢 Monitoring Active</p>
+                <p style="font-size: 13px; color: #666; margin-top: 10px;">Your webcam and microphone are being recorded for proctoring purposes.</p>
+            </div>
+        </aside>
+        
+    </div>
+
+    <!-- The Proctoring Logic Engine -->
+    <script>
+        const video = document.getElementById("video");
+        const statusText = document.getElementById("status-text");
+        const warningBox = document.getElementById("violation-warning");
+        const warningText = document.getElementById("warning-text");
+        
+        let mediaRecorder;
+        let recordedChunks = [];
+        let ws; // For live frame sending to admin
+        let monitorInterval;
+
+        function showWarning(msg) {
+            warningText.textContent = msg;
+            warningBox.style.display = "block";
+            setTimeout(() => { warningBox.style.display = "none"; }, 5000);
+        }
+
+        // 1. Behavior Monitor (Tab Switch)
+        document.addEventListener("visibilitychange", function () {
+            if (document.hidden) {
+                console.warn("Tab switched!");
+                showWarning("Tab switching is strictly forbidden!");
+                
+                // Alert backend
+                fetch("/api/violation", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: "TAB_SWITCH" })
+                }).catch(e => console.error(e));
+                
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "violation", violation_type: "tab_switch" }));
+                }
+            }
+        });
+
+        // 2. Initialize Camera & Media Recorder
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                // Attach stream to video tag so student sees themselves continuously
+                video.srcObject = stream;
+                
+                // Set up the full session recording piece
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = uploadRecording;
+                
+                // Start continuous recording immediately
+                mediaRecorder.start(1000); 
+                console.log("Session recording started.");
+
+                // Start AI Face tracking over WebSocket
+                initLiveMonitoring();
+            })
+            .catch(err => {
+                console.error("Camera access denied", err);
+                statusText.innerHTML = "🔴 Camera Access Denied. Cannot take exam.";
+                statusText.style.color = "red";
+                alert("Camera and Microphone access are required to begin the exam.");
+            });
+
+        // 3. Initiate Live Frame checking (WebSockets to backend)
+        function initLiveMonitoring() {
+            // Attempt websocket connection to the stream
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            // Extract port natively
+            const host = window.location.host;
+            ws = new WebSocket(`${protocol}//${host}/ws/exam/stream`);
+
+            ws.onopen = () => {
+                console.log("Connected to AI Proctoring Stream");
+                
+                // Grab a frame from the student's video strictly every 2 seconds
+                monitorInterval = setInterval(() => {
+                    if (video.readyState >= 2) { // HAVE_CURRENT_DATA
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 300; // compress it gracefully
+                        canvas.height = (300 / video.videoWidth) * video.videoHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const frameData = canvas.toDataURL('image/jpeg', 0.6);
+                        
+                        if(ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'frame', image: frameData }));
+                        }
+                    }
+                }, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'violation') {
+                    showWarning(data.message);
+                }
+            };
+        }
+
+        // 4. Handle Exam Finalization & Upload
+        function uploadRecording() {
+            statusText.innerText = "🟠 Uploading session to server...";
+            statusText.style.color = "#ff9900";
+            
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const formData = new FormData();
+            
+            const studentId = localStorage.getItem('student_id') || 'student_' + Math.floor(Math.random()*1000);
+            formData.append('file', blob, studentId + '_final_exam.webm');
+            
+            fetch("/api/upload_recording", {
+                method: "POST",
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                statusText.innerText = "🔵 Exam Submitted. Upload complete.";
+                statusText.style.color = "#0056b3";
+                alert("Exam saved! You may now close this window.");
+            })
+            .catch(err => {
+                console.error("Upload error:", err);
+                statusText.innerText = "🔴 Server Upload Failed.";
+                statusText.style.color = "red";
+                alert("There was an error uploading your recording to the server.");
+            });
+        }
+
+        // 5. Submit Button Listener
+        document.getElementById("finish-btn").addEventListener("click", () => {
+            if (confirm("Are you sure you want to submit your exam?")) {
+                if (monitorInterval) clearInterval(monitorInterval);
+                if (ws) ws.close();
+                
+                if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                    mediaRecorder.stop();
+                    // Optional: You can choose to leave the video playing locally or kill the camera lights
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
+            }
+        });
+    </script>
+</body>
+</html>

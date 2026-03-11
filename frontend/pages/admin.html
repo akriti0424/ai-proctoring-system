@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Proctoring - Admin Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 20px; }
+        .dashboard { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+        .video-container { text-align: center; background: #000; padding: 10px; border-radius: 8px; margin-bottom: 20px; }
+        #live-stream { max-width: 100%; border: 2px solid #444; border-radius: 4px; }
+        .logs-container { background: #fff3f3; padding: 15px; border-left: 5px solid #ff4d4d; height: 300px; overflow-y: auto; }
+        .log-entry { margin-bottom: 10px; padding: 8px; background: #fff; border: 1px solid #ffcccc; border-radius: 4px; color: #cc0000; font-weight: bold; }
+        .log-time { font-size: 0.8em; color: #666; font-weight: normal; margin-right: 10px; }
+        .status-badge { text-align: center; padding: 10px; background: #e6f7ff; color: #d90000; font-weight: bold; border-radius: 5px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <h2>Proctoring Admin Dashboard</h2>
+    
+    <div class="status-badge" id="conn-status">Waiting for stream connection...</div>
+
+    <div class="video-container">
+        <!-- The live stream frames will be rendered here -->
+        <img id="live-stream" src="" alt="Waiting for student camera feed..." style="display:none; width: 640px; height: 480px; object-fit: cover;">
+    </div>
+
+    <h3>Real-Time Violation Logs</h3>
+    <div class="logs-container" id="violation-logs">
+        <!-- Logs will appear here -->
+    </div>
+</div>
+
+<script>
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const ws = new WebSocket(`${protocol}//${host}/ws/admin/stream`);
+    
+    const liveStream = document.getElementById('live-stream');
+    const connStatus = document.getElementById('conn-status');
+    const logsContainer = document.getElementById('violation-logs');
+
+    ws.onopen = () => {
+        console.log("Connected to Admin WebSocket");
+        connStatus.innerHTML = "🟢 Connected to Live Monitor";
+        connStatus.style.background = "#e6ffe6";
+        connStatus.style.color = "#006600";
+    };
+
+    ws.onclose = () => {
+        connStatus.innerHTML = "🔴 Connection Lost to Live Monitor";
+        connStatus.style.background = "#ffe6e6";
+        connStatus.style.color = "#cc0000";
+    };
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'frame') {
+            // Display the video frame
+            liveStream.style.display = "inline";
+            liveStream.src = data.image;
+        } 
+        else if (data.type === 'violation') {
+            // Log the violation
+            addLog(data.message);
+        }
+    };
+
+    function addLog(message) {
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        
+        const timeStr = new Date().toLocaleTimeString();
+        div.innerHTML = `<span class="log-time">[${timeStr}]</span> ${message}`;
+        
+        logsContainer.prepend(div); // Add to top
+    }
+</script>
+
+</body>
+</html>
