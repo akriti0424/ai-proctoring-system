@@ -1,6 +1,7 @@
 from fastapi import FastAPI
-from fastapi.staticifiles import StaticFiles
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 
 #importing controllers
@@ -23,3 +24,7 @@ app.mount("/static", StaticFiles(directory = "../frontend"), name = "static")
 @app.get("/")
 def home():
     return FileResponse("../frontend/pages/login.html")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
