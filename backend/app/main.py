@@ -1,33 +1,25 @@
 from fastapi import FastAPI
-from app.webcam_service import WebcamService
-from app.face_detection import detect_faces
+from fastapi.staticifiles import StaticFiles
+from fastapi.responses import FileResponse
 
-app = FastAPI(title="Basic Proctoring")
 
-webcam = WebcamService()
-last_status = "Not started"
+#importing controllers
+from app.controllers.exam_controller import router as exam_router
+from app.controllers.auth_controller import router as auth_router
+from app.controllers.admin_controller import router as admin_router
 
-def analyze(frame):
-    global last_status
-    faces = detect_faces(frame)
+app = FastAPI(title="AI Proctoring System")
 
-    if faces == 0:
-        last_status = "No face detected"
-    elif faces > 1:
-        last_status = "Multiple faces detected"
-    else:
-        last_status = "Single face detected"
 
-@app.get("/start-proctoring")
-def start_proctoring():
-    webcam.start(analyze)
-    return {"status": "Proctoring started"}
+#including API routers
+app.include_router(auth_router)
+app.include_router(exam_router)
+app.include_router(admin_router)
 
-@app.get("/status")
-def get_status():
-    return {"status": last_status}
 
-@app.get("/stop-proctoring")
-def stop_proctoring():
-    webcam.stop()
-    return {"status": "Proctoring stopped, video saved"}
+#Serving fontend static files
+app.mount("/static", StaticFiles(directory = "../frontend"), name = "static")
+
+@app.get("/")
+def home():
+    return FileResponse("../frontend/pages/login.html")
