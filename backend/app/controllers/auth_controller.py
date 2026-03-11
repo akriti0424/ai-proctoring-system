@@ -1,29 +1,20 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
-import uuid
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter()
 
-# Temporary session storage
-sessions = {}
-
-class LoginRequest(BaseModel):
-    name: str
-    email: str
+# temporary users
+USER_DB = {
+    "student1": "1234"
+}
 
 
 @router.post("/login")
-def login(data: LoginRequest):
+async def login(data: dict):
 
-    session_id = str(uuid.uuid4())
+    username = data.get("username")
+    password = data.get("password")
 
-    sessions[session_id] = {
-        "name": data.name,
-        "email": data.email,
-        "status": "exam_not_started"
-    }
+    if username in USER_DB and USER_DB[username] == password:
+        return {"status": "success"}
 
-    return {
-        "message": "Login successful",
-        "session_id": session_id
-    }
+    return {"status": "invalid"}
