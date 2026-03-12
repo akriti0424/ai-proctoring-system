@@ -35,8 +35,12 @@
 </div>
 
 <script>
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
+    let protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let host = window.location.host;
+    if (!host || host === "") {
+        host = "127.0.0.1:8000";
+        protocol = "ws:";
+    }
     const ws = new WebSocket(`${protocol}//${host}/ws/admin/stream`);
     
     const liveStream = document.getElementById('live-stream');

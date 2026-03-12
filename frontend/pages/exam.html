@@ -198,8 +198,14 @@
                 // Attach stream to video tag so student sees themselves continuously
                 video.srcObject = stream;
                 
+                // Determine best supported format. Fallback to webm if mp4 isn't supported by browser (e.g. Chrome)
+                let options = { mimeType: 'video/webm' };
+                if (MediaRecorder.isTypeSupported('video/mp4')) {
+                    options = { mimeType: 'video/mp4' };
+                }
+
                 // Set up the full session recording piece
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                mediaRecorder = new MediaRecorder(stream, options);
                 mediaRecorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
                         recordedChunks.push(event.data);
@@ -224,10 +230,14 @@
 
         // 3. Initiate Live Frame checking (WebSockets to backend)
         function initLiveMonitoring() {
-            // Attempt websocket connection to the stream
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Extract port natively
-            const host = window.location.host;
+            // Ensure connection to backend even if opened from file://
+            let host = window.location.host;
+            let protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            // Default to localhost if opened as file://
+            if (!host || host === "") {
+                host = "127.0.0.1:8000";
+                protocol = "ws:";
+            }
             ws = new WebSocket(`${protocol}//${host}/ws/exam/stream`);
 
             ws.onopen = () => {
@@ -263,13 +273,35 @@
             statusText.innerText = "🟠 Uploading session to server...";
             statusText.style.color = "#ff9900";
             
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+            const targetMimeType = isSafari ? 'video/mp4' : 'video/webm';
+            
+            const blob = new Blob(recordedChunks, { type: targetMimeType });
+            
+            // Allow user to download/save the recording locally
+            const localSaveLink = document.createElement('a');
+            localSaveLink.href = URL.createObjectURL(blob);
+            const ext = isSafari ? '.mp4' : '.webm';
+            localSaveLink.download = 'my_exam_recording' + ext;
+            document.body.appendChild(localSaveLink);
+            localSaveLink.click();
+            document.body.removeChild(localSaveLink);
+
             const formData = new FormData();
             
             const studentId = localStorage.getItem('student_id') || 'student_' + Math.floor(Math.random()*1000);
-            formData.append('file', blob, studentId + '_final_exam.webm');
+            const timestamp = new Date().getTime();
+            const fileName = studentId + '_final_exam_' + timestamp + ext;
             
-            fetch("/api/upload_recording", {
+            formData.append('file', blob, fileName);
+            
+            // Build the base server URL if opened from file://
+            let apiUrl = "/api/upload_recording";
+            if (window.location.protocol === "file:") {
+                apiUrl = "http://127.0.0.1:8000/api/upload_recording";
+            }
+
+            fetch(apiUrl, {
                 method: "POST",
                 body: formData
             })
